@@ -6,10 +6,10 @@ import os
 
 app = Flask(__name__)
 
+
 def calcular_calidad(imagen_path):
     # Leer la imagen
     img = cv2.imread(imagen_path, cv2.IMREAD_COLOR)
-
     if img is None:
         return 0
 
@@ -25,11 +25,35 @@ def calcular_calidad(imagen_path):
     # Contraste
     contraste = gris.std()
 
-    # Puntaje final (normalizado)
+    # ---- NUEVAS MÉTRICAS ----
+
+    # Resolución mínima
+    alto, ancho = img.shape[:2]
+    penalizacion = 0
+    if ancho < 720 or alto < 720:
+        penalizacion += 2
+
+    # Exposición (pixeles demasiado claros/oscuros)
+    subexpuestos = np.mean(gris < 30) * 100
+    sobreexpuestos = np.mean(gris > 220) * 100
+    if subexpuestos > 40 or sobreexpuestos > 40:
+        penalizacion += 2
+
+    # Ruido digital (diferencia con suavizado)
+    suavizada = cv2.GaussianBlur(gris, (3, 3), 0)
+    ruido = np.mean(cv2.absdiff(gris, suavizada))
+    if ruido > 25:
+        penalizacion += 1.5
+
+    # Puntaje final (ponderado + penalizaciones)
     puntaje = (0.4*nitidez + 0.3*brillo + 0.3*contraste) / 100
-    puntaje = min(max(puntaje, 0), 10)  # rango 0 a 10
+    puntaje = puntaje - penalizacion
+
+    # Limitar de 0 a 10
+    puntaje = min(max(puntaje, 0), 10)
 
     return round(puntaje, 2)
+
 
 @app.route('/analizar', methods=['POST'])
 def analizar():
@@ -47,7 +71,8 @@ def analizar():
 
     return jsonify({'puntaje': puntaje})
 
+
 if __name__ == '__main__':
-    # Render asigna el puerto por variable de entorno
+    # Usar puerto dinámico que da Render, 5000 localmente
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
