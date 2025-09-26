@@ -1,13 +1,4 @@
-from flask import Flask, request, jsonify
-from skimage import io, exposure, filters
-import numpy as np
-import cv2
-import os
-
-app = Flask(__name__)
-
-
-def calcular_calidad(imagen_path):
+def calcular_calidad(imagen_path, tipo='producto'):
     # Leer la imagen
     img = cv2.imread(imagen_path, cv2.IMREAD_COLOR)
     if img is None:
@@ -24,8 +15,6 @@ def calcular_calidad(imagen_path):
 
     # Contraste
     contraste = gris.std()
-
-    # ---- NUEVAS MÉTRICAS ----
 
     # Resolución mínima
     alto, ancho = img.shape[:2]
@@ -45,34 +34,35 @@ def calcular_calidad(imagen_path):
     if ruido > 25:
         penalizacion += 1.5
 
-    # Puntaje final (ponderado + penalizaciones)
-    puntaje = (0.4*nitidez + 0.3*brillo + 0.3*contraste) / 100
+    # Ajustar ponderaciones según tipo de foto
+    if tipo == 'perfil':
+        # Nitidez y exposición en el rostro central
+        h, w = gris.shape
+        centro = gris[h//4:3*h//4, w//4:3*w//4]
+        if np.mean(centro) < 50 or np.mean(centro) > 200:
+            penalizacion += 1.5
+        puntaje = (0.5*nitidez + 0.25*brillo + 0.25*contraste)/100
+
+    elif tipo == 'producto':
+        # En productos, priorizar brillo y exposición uniforme
+        if gris.std() < 30:  # fondo muy uniforme o sombras
+            penalizacion += 1
+        puntaje = (0.3*nitidez + 0.4*brillo + 0.3*contraste)/100
+
+    elif tipo == 'redes':
+        # En redes, priorizar contraste y nitidez
+        if contraste > 70:
+            puntaje += 0.5  # bonus por buen contraste
+        puntaje = (0.3*nitidez + 0.3*brillo + 0.4*contraste)/100
+
+    else:
+        # Default
+        puntaje = (0.4*nitidez + 0.3*brillo + 0.3*contraste)/100
+
+    # Puntaje final con penalizaciones
     puntaje = puntaje - penalizacion
 
     # Limitar de 0 a 10
     puntaje = min(max(puntaje, 0), 10)
 
     return round(puntaje, 2)
-
-
-@app.route('/analizar', methods=['POST'])
-def analizar():
-    if 'foto' not in request.files:
-        return jsonify({'error': 'No se envió foto'}), 400
-
-    foto = request.files['foto']
-    ruta = f"temp_{foto.filename}"
-    foto.save(ruta)
-
-    puntaje = calcular_calidad(ruta)
-
-    # Borrar la foto temporal
-    os.remove(ruta)
-
-    return jsonify({'puntaje': puntaje})
-
-
-if __name__ == '__main__':
-    # Usar puerto dinámico que da Render, 5000 localmente
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
