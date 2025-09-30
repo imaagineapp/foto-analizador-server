@@ -3,6 +3,9 @@ import numpy as np
 import os
 from skimage.filters import sobel, laplace, median
 from skimage.morphology import disk
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
 
 # ---------- FUNCIONES DE ANÁLISIS ----------
 
@@ -10,7 +13,7 @@ from skimage.morphology import disk
 def sharpness_score(gray):
     lap = laplace(gray)
     sob = sobel(gray)
-    return (lap.var() + sob.var())
+    return lap.var() + sob.var()
 
 # 2. Brillo (histograma)
 def brightness_score(gray):
@@ -52,7 +55,11 @@ def file_size_score(path):
 # ---------- FUNCIÓN PRINCIPAL ----------
 
 def analyze_image(path):
+    # Validación de que la imagen exista y se pueda leer
     img = cv2.imread(path)
+    if img is None:
+        return {"error": "No se pudo cargar la imagen. Verifique la ruta o el archivo."}, 400
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     results = {
@@ -75,11 +82,31 @@ def analyze_image(path):
         "metricas": results,
         "normalizadas": normalized,
         "puntaje_final": float(score)
-    }
+    }, 200
 
 
-# ---------- EJEMPLO DE USO ----------
+# ---------- RUTA FLASK PARA ANALIZAR IMAGEN ----------
+@app.route("/analizar", methods=["POST"])
+def analizar_endpoint():
+    if "imagen" not in request.files:
+        return jsonify({"error": "No se envió ningún archivo."}), 400
+
+    file = request.files["imagen"]
+    if file.filename == "":
+        return jsonify({"error": "Archivo sin nombre."}), 400
+
+    # Guardar temporalmente
+    temp_path = f"temp_{file.filename}"
+    file.save(temp_path)
+
+    resultado, status = analyze_image(temp_path)
+
+    # Borrar archivo temporal
+    os.remove(temp_path)
+
+    return jsonify(resultado), status
+
+
+# ---------- EJEMPLO DE USO LOCAL ----------
 if __name__ == "__main__":
-    ruta = "ejemplo.jpg"  # reemplazar con una imagen real
-    analisis = analyze_image(ruta)
-    print(analisis)
+    app.run(debug=True)
