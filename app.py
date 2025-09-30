@@ -1,68 +1,85 @@
-def calcular_calidad(imagen_path, tipo='producto'):
-    # Leer la imagen
-    img = cv2.imread(imagen_path, cv2.IMREAD_COLOR)
-    if img is None:
-        return 0
+import cv2
+import numpy as np
+import os
+from skimage.filters import sobel, laplace, median
+from skimage.morphology import disk
 
-    # Convertir a gris
-    gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+# ---------- FUNCIONES DE ANÁLISIS ----------
 
-    # Nitidez (varianza del laplaciano)
-    nitidez = cv2.Laplacian(gris, cv2.CV_64F).var()
+# 1. Nitidez (Laplaciano + Sobel)
+def sharpness_score(gray):
+    lap = laplace(gray)
+    sob = sobel(gray)
+    return (lap.var() + sob.var())
 
-    # Brillo promedio
-    brillo = np.mean(gris)
+# 2. Brillo (histograma)
+def brightness_score(gray):
+    hist = cv2.calcHist([gray], [0], None, [256], [0,256])
+    total_pixels = gray.size
+    dark_pixels = hist[:30].sum() / total_pixels
+    bright_pixels = hist[220:].sum() / total_pixels
+    return float(1 - (dark_pixels + bright_pixels))  # penaliza extremos
 
-    # Contraste
-    contraste = gris.std()
+# 3. Contraste (percentiles)
+def contrast_score(gray):
+    p5, p95 = np.percentile(gray, (5,95))
+    return float((p95 - p5) / 255.0)
 
-    # Resolución mínima
-    alto, ancho = img.shape[:2]
-    penalizacion = 0
-    if ancho < 720 or alto < 720:
-        penalizacion += 2
+# 4. Ruido (filtro mediana)
+def noise_score(gray):
+    denoised = median(gray, disk(3))
+    diff = np.abs(gray.astype("float32") - denoised.astype("float32"))
+    return float(1 - (np.mean(diff) / 255.0))
 
-    # Exposición (pixeles demasiado claros/oscuros)
-    subexpuestos = np.mean(gris < 30) * 100
-    sobreexpuestos = np.mean(gris > 220) * 100
-    if subexpuestos > 40 or sobreexpuestos > 40:
-        penalizacion += 2
+# 5. Colores (saturación promedio)
+def color_score(img):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:,:,1].mean() / 255.0
+    return float(saturation)
 
-    # Ruido digital (diferencia con suavizado)
-    suavizada = cv2.GaussianBlur(gris, (3, 3), 0)
-    ruido = np.mean(cv2.absdiff(gris, suavizada))
-    if ruido > 25:
-        penalizacion += 1.5
+# 6. Encuadre (detalle en el centro vs toda la foto)
+def center_score(gray):
+    h, w = gray.shape
+    center = gray[h//4:3*h//4, w//4:3*w//4]
+    return float(center.var() / (gray.var() + 1e-6))
 
-    # Ajustar ponderaciones según tipo de foto
-    if tipo == 'perfil':
-        # Nitidez y exposición en el rostro central
-        h, w = gris.shape
-        centro = gris[h//4:3*h//4, w//4:3*w//4]
-        if np.mean(centro) < 50 or np.mean(centro) > 200:
-            penalizacion += 1.5
-        puntaje = (0.5*nitidez + 0.25*brillo + 0.25*contraste)/100
+# 7. Tamaño de archivo
+def file_size_score(path):
+    size_kb = os.path.getsize(path) / 1024
+    return float(min(1.0, size_kb / 100.0))  # hasta 100 KB puntaje completo
 
-    elif tipo == 'producto':
-        # En productos, priorizar brillo y exposición uniforme
-        if gris.std() < 30:  # fondo muy uniforme o sombras
-            penalizacion += 1
-        puntaje = (0.3*nitidez + 0.4*brillo + 0.3*contraste)/100
 
-    elif tipo == 'redes':
-        # En redes, priorizar contraste y nitidez
-        if contraste > 70:
-            puntaje += 0.5  # bonus por buen contraste
-        puntaje = (0.3*nitidez + 0.3*brillo + 0.4*contraste)/100
+# ---------- FUNCIÓN PRINCIPAL ----------
 
-    else:
-        # Default
-        puntaje = (0.4*nitidez + 0.3*brillo + 0.3*contraste)/100
+def analyze_image(path):
+    img = cv2.imread(path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # Puntaje final con penalizaciones
-    puntaje = puntaje - penalizacion
+    results = {
+        "nitidez": sharpness_score(gray),
+        "brillo": brightness_score(gray),
+        "contraste": contrast_score(gray),
+        "ruido": noise_score(gray),
+        "color": color_score(img),
+        "encuadre": center_score(gray),
+        "peso": file_size_score(path)
+    }
 
-    # Limitar de 0 a 10
-    puntaje = min(max(puntaje, 0), 10)
+    # Normalizar cada métrica a 0–1
+    normalized = {k: min(1.0, max(0.0, v)) for k,v in results.items()}
 
-    return round(puntaje, 2)
+    # Promedio de puntaje final
+    score = np.mean(list(normalized.values()))
+
+    return {
+        "metricas": results,
+        "normalizadas": normalized,
+        "puntaje_final": float(score)
+    }
+
+
+# ---------- EJEMPLO DE USO ----------
+if __name__ == "__main__":
+    ruta = "ejemplo.jpg"  # reemplazar con una imagen real
+    analisis = analyze_image(ruta)
+    print(analisis)
