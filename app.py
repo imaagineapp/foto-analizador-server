@@ -79,7 +79,11 @@ def smile_score(gray):
 
 # ---------- FUNCIÓN PRINCIPAL ----------
 def analyze_image(path, tipo="producto"):
+    print("Ruta de imagen recibida:", path)
+    print("Tipo:", tipo)
     img = cv2.imread(path)
+    print("Imagen cargada:", img is not None)
+
     if img is None:
         # Siempre devolver métricas aunque sean 0
         empty_metrics = {
@@ -88,7 +92,13 @@ def analyze_image(path, tipo="producto"):
         }
         if tipo=="perfil": empty_metrics["ojos_abiertos"] = 0
         elif tipo=="redes": empty_metrics["sonrisa"] = 0
-        return {"metricas":empty_metrics, "normalizadas":empty_metrics, "puntaje_final":0.0, "razon":"No se pudo analizar la foto", "mejor_foto":os.path.basename(path)}, 200
+        return {
+            "metricas": empty_metrics,
+            "normalizadas": empty_metrics,
+            "puntaje_final": 0.0,
+            "razon": "No se pudo analizar la foto",
+            "mejor_foto": os.path.basename(path)
+        }, 200
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
