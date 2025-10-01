@@ -81,17 +81,19 @@ def smile_score(gray):
 def analyze_image(path, tipo="producto"):
     print("Ruta de imagen recibida:", path)
     print("Tipo:", tipo)
+
     img = cv2.imread(path)
     print("Imagen cargada:", img is not None)
 
     if img is None:
         # Siempre devolver métricas aunque sean 0
         empty_metrics = {
-            "nitidez":0,"brillo":0,"contraste":0,"ruido":0,
-            "color":0,"encuadre":0,"peso":0
+            "nitidez":0, "brillo":0, "contraste":0, "ruido":0,
+            "color":0, "encuadre":0, "peso":0
         }
-        if tipo=="perfil": empty_metrics["ojos_abiertos"] = 0
-        elif tipo=="redes": empty_metrics["sonrisa"] = 0
+        if tipo == "perfil": empty_metrics["ojos_abiertos"] = 0
+        elif tipo == "redes": empty_metrics["sonrisa"] = 0
+
         return {
             "metricas": empty_metrics,
             "normalizadas": empty_metrics,
@@ -100,6 +102,7 @@ def analyze_image(path, tipo="producto"):
             "mejor_foto": os.path.basename(path)
         }, 200
 
+    # --- Procesar imagen ---
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     results = {
@@ -115,31 +118,37 @@ def analyze_image(path, tipo="producto"):
     if tipo == "perfil": results["ojos_abiertos"] = eyes_open_score(gray)
     elif tipo == "redes": results["sonrisa"] = smile_score(gray)
 
-    normalized = {k: min(1.0, max(0.0, v)) for k,v in results.items()}
+    normalized = {k: min(1.0, max(0.0, v)) for k, v in results.items()}
 
     weights = {
-        "nitidez":0.2, "brillo":0.15, "contraste":0.1,
-        "color":0.15, "encuadre":0.1, "peso":0.1
+        "nitidez": 0.2, "brillo": 0.15, "contraste": 0.1,
+        "color": 0.15, "encuadre": 0.1, "peso": 0.1
     }
-    if tipo=="perfil": weights["ojos_abiertos"]=0.2
-    elif tipo=="redes": weights["sonrisa"]=0.2
+    if tipo == "perfil": weights["ojos_abiertos"] = 0.2
+    elif tipo == "redes": weights["sonrisa"] = 0.2
 
-    score = sum(normalized[k]*weights.get(k,0) for k in normalized)
+    score = sum(normalized[k] * weights.get(k, 0) for k in normalized)
 
     # Generar razón textual según métrica top
     top_metric = max(normalized, key=lambda k: normalized[k])
     razon_map = {
-        "nitidez":"Mejor enfoque",
-        "brillo":"Mejor iluminación",
-        "contraste":"Mejor contraste",
-        "ruido":"Menos ruido",
-        "color":"Colores más vivos",
-        "encuadre":"Mejor encuadre",
-        "peso":"Tamaño de archivo óptimo",
-        "ojos_abiertos":"Ojos abiertos",
-        "sonrisa":"Sonrisa captada"
+        "nitidez": "Mejor enfoque",
+        "brillo": "Mejor iluminación",
+        "contraste": "Mejor contraste",
+        "ruido": "Menos ruido",
+        "color": "Colores más vivos",
+        "encuadre": "Mejor encuadre",
+        "peso": "Tamaño de archivo óptimo",
+        "ojos_abiertos": "Ojos abiertos",
+        "sonrisa": "Sonrisa captada"
     }
     razon = razon_map.get(top_metric, f"Destaca en {top_metric}")
+
+    # --- PRINTS PARA DEPURACIÓN ---
+    print("Resultados calculados:", results)
+    print("Normalizadas:", normalized)
+    print("Puntaje final:", score)
+    print("Razón:", razon)
 
     return {
         "metricas": results,
@@ -148,6 +157,7 @@ def analyze_image(path, tipo="producto"):
         "razon": razon,
         "mejor_foto": os.path.basename(path)
     }, 200
+
 
 # ---------- RUTA FLASK ----------
 @app.route("/analizar", methods=["POST"])
