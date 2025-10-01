@@ -138,22 +138,23 @@ def analyze_image(path, tipo="producto"):
 # ---------- RUTA FLASK ----------
 @app.route("/analizar", methods=["POST"])
 def analizar_endpoint():
-    tipo = request.form.get("tipo","producto")
-    if "imagen" not in request.files:
-        return jsonify({"error":"No se envió ningún archivo"}),400
+    tipo = request.form.get("tipo", "producto")
+    if "foto" not in request.files:
+        return jsonify({"error": "No se envió ningún archivo"}), 400
 
-    file = request.files["imagen"]
-    if file.filename=="":
-        return jsonify({"error":"Archivo sin nombre"}),400
+    file = request.files["foto"]
+    if file.filename == "":
+        return jsonify({"error": "Archivo sin nombre"}), 400
 
     temp_path = f"temp_{file.filename}"
     try:
         file.save(temp_path)
-        resultado,status = analyze_image(temp_path, tipo)
+        resultado, status = analyze_image(temp_path, tipo)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-    return jsonify(resultado),status
+    return jsonify(resultado), status
+
 
 if __name__=="__main__":
     app.run(debug=True)
