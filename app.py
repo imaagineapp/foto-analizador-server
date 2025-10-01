@@ -11,13 +11,11 @@ app = Flask(__name__)
 
 # --- Cargamos detector y predictor ---
 detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")  # descargar de dlib
+predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
 # ---------- FUNCIONES DE ANÁLISIS ----------
 def sharpness_score(gray):
-    lap = laplace(gray)
-    sob = sobel(gray)
-    return lap.var() + sob.var()
+    return laplace(gray).var() + sobel(gray).var()
 
 def brightness_score(gray):
     hist = cv2.calcHist([gray], [0], None, [256], [0,256])
@@ -37,8 +35,7 @@ def noise_score(gray):
 
 def color_score(img):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    saturation = hsv[:,:,1].mean() / 255.0
-    return float(saturation)
+    return float(hsv[:,:,1].mean() / 255.0)
 
 def center_score(gray):
     h, w = gray.shape
@@ -52,8 +49,7 @@ def file_size_score(path):
 def eyes_open_score(gray):
     try:
         rects = detector(gray, 1)
-        if not rects:
-            return 0.0
+        if not rects: return 0.0
         for rect in rects:
             shape = predictor(gray, rect)
             shape = face_utils.shape_to_np(shape)
@@ -65,14 +61,12 @@ def eyes_open_score(gray):
                 return vert / (hor + 1e-6)
             ratio = (eye_ratio(left_eye) + eye_ratio(right_eye)) / 2
             return float(min(1.0, ratio*5))
-    except:
-        return 0.0
+    except: return 0.0
 
 def smile_score(gray):
     try:
         rects = detector(gray, 1)
-        if not rects:
-            return 0.0
+        if not rects: return 0.0
         for rect in rects:
             shape = predictor(gray, rect)
             shape = face_utils.shape_to_np(shape)
@@ -81,23 +75,20 @@ def smile_score(gray):
             vert = np.linalg.norm(mouth[3]-mouth[9])
             ratio = vert / (horiz + 1e-6)
             return float(min(1.0, ratio*5))
-    except:
-        return 0.0
+    except: return 0.0
 
 # ---------- FUNCIÓN PRINCIPAL ----------
 def analyze_image(path, tipo="producto"):
     img = cv2.imread(path)
-    # Si falla la carga, devolvemos métricas vacías con puntaje 0
     if img is None:
+        # Siempre devolver métricas aunque sean 0
         empty_metrics = {
             "nitidez":0,"brillo":0,"contraste":0,"ruido":0,
             "color":0,"encuadre":0,"peso":0
         }
-        if tipo=="perfil":
-            empty_metrics["ojos_abiertos"] = 0
-        elif tipo=="redes":
-            empty_metrics["sonrisa"] = 0
-        return {"metricas":empty_metrics, "normalizadas":empty_metrics, "puntaje_final":0.0},200
+        if tipo=="perfil": empty_metrics["ojos_abiertos"] = 0
+        elif tipo=="redes": empty_metrics["sonrisa"] = 0
+        return {"metricas":empty_metrics, "normalizadas":empty_metrics, "puntaje_final":0.0, "razon":"No se pudo analizar la foto", "mejor_foto":os.path.basename(path)}, 200
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
@@ -111,29 +102,42 @@ def analyze_image(path, tipo="producto"):
         "peso": file_size_score(path)
     }
 
-    if tipo == "perfil":
-        results["ojos_abiertos"] = eyes_open_score(gray)
-    elif tipo == "redes":
-        results["sonrisa"] = smile_score(gray)
+    if tipo == "perfil": results["ojos_abiertos"] = eyes_open_score(gray)
+    elif tipo == "redes": results["sonrisa"] = smile_score(gray)
 
     normalized = {k: min(1.0, max(0.0, v)) for k,v in results.items()}
 
     weights = {
-        "nitidez":0.2,
-        "brillo":0.15,
-        "contraste":0.1,
-        "color":0.15,
-        "encuadre":0.1,
-        "peso":0.1
+        "nitidez":0.2, "brillo":0.15, "contraste":0.1,
+        "color":0.15, "encuadre":0.1, "peso":0.1
     }
-    if tipo=="perfil":
-        weights["ojos_abiertos"] = 0.2
-    elif tipo=="redes":
-        weights["sonrisa"] = 0.2
+    if tipo=="perfil": weights["ojos_abiertos"]=0.2
+    elif tipo=="redes": weights["sonrisa"]=0.2
 
     score = sum(normalized[k]*weights.get(k,0) for k in normalized)
 
-    return {"metricas":results, "normalizadas":normalized, "puntaje_final":float(score)},200
+    # Generar razón textual según métrica top
+    top_metric = max(normalized, key=lambda k: normalized[k])
+    razon_map = {
+        "nitidez":"Mejor enfoque",
+        "brillo":"Mejor iluminación",
+        "contraste":"Mejor contraste",
+        "ruido":"Menos ruido",
+        "color":"Colores más vivos",
+        "encuadre":"Mejor encuadre",
+        "peso":"Tamaño de archivo óptimo",
+        "ojos_abiertos":"Ojos abiertos",
+        "sonrisa":"Sonrisa captada"
+    }
+    razon = razon_map.get(top_metric, f"Destaca en {top_metric}")
+
+    return {
+        "metricas": results,
+        "normalizadas": normalized,
+        "puntaje_final": float(score),
+        "razon": razon,
+        "mejor_foto": os.path.basename(path)
+    }, 200
 
 # ---------- RUTA FLASK ----------
 @app.route("/analizar", methods=["POST"])
@@ -153,8 +157,8 @@ def analizar_endpoint():
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-    return jsonify(resultado), status
 
+    return jsonify(resultado), status
 
 if __name__=="__main__":
     app.run(debug=True)
