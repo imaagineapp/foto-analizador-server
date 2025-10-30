@@ -158,5 +158,12 @@ def analizar_endpoint():
     return jsonify(resultado), status
 
 
+# 👇 Agregá esto justo antes del bloque main
+@app.route("/ping")
+def ping():
+    return "pong", 200
+
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
+
