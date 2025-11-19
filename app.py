@@ -10,13 +10,13 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# ---------- FUNCIONES DE ANÁLISIS ----------
-
+# ----------------------------------------------------
+#                 FUNCIONES DE ANÁLISIS
+# ----------------------------------------------------
 
 def sharpness_score(gray):
     gray_float = gray.astype(np.float32) / 255.0
     return laplace(gray_float).var() + sobel(gray_float).var()
-
 
 def brightness_score(gray):
     hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
@@ -25,35 +25,32 @@ def brightness_score(gray):
     bright_pixels = hist[220:].sum() / total_pixels
     return 1.0 - float(dark_pixels + bright_pixels)
 
-
 def contrast_score(gray):
     p5, p95 = np.percentile(gray, (5, 95))
     return float((p95 - p5) / 255.0)
-
 
 def noise_score(gray):
     denoised = median(gray, disk(3))
     diff = np.abs(gray.astype("float32") - denoised.astype("float32"))
     return 1.0 - float(np.mean(diff) / 255.0)
 
-
 def color_score(img):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     return float(hsv[:, :, 1].mean() / 255.0)
-
 
 def center_score(gray):
     h, w = gray.shape
     center = gray[h//4:3*h//4, w//4:3*w//4]
     return float(center.var() / (gray.var() + 1e-6))
 
-
 def file_size_score(path):
     size_kb = os.path.getsize(path) / 1024
-    return float(min(1.0, size_kb / 100.0))
+    return float(min(1.0, max(0.0, size_kb / 100.0)))
 
-# ---------- FUNCIÓN PRINCIPAL ----------
 
+# ----------------------------------------------------
+#                FUNCIÓN PRINCIPAL
+# ----------------------------------------------------
 
 def analyze_image(path, tipo="producto"):
     img = cv2.imread(path)
@@ -100,13 +97,11 @@ def analyze_image(path, tipo="producto"):
             "ruido": 0.1, "color": 0.25, "encuadre": 0.05, "peso": 0.05
         }
     else:
-        # Por defecto, usa los de producto
         weights = {
             "nitidez": 0.25, "brillo": 0.15, "contraste": 0.1,
             "ruido": 0.1, "color": 0.15, "encuadre": 0.15, "peso": 0.1
         }
 
-    # ---------- CÁLCULO FINAL ----------
     weighted_contributions = {
         k: float(normalized[k] * weights.get(k, 0)) for k in normalized}
     score = float(sum(weighted_contributions.values()))
@@ -134,12 +129,15 @@ def analyze_image(path, tipo="producto"):
         "mejor_foto": os.path.basename(path)
     }, 200
 
-# ---------- RUTA FLASK ----------
 
+# ----------------------------------------------------
+#                  ENDPOINT 1 FOTO
+# ----------------------------------------------------
 
 @app.route("/analizar", methods=["POST"])
 def analizar_endpoint():
     tipo = request.form.get("tipo", "producto")
+
     if "foto" not in request.files:
         return jsonify({"error": "No se envió ningún archivo"}), 400
 
@@ -158,12 +156,57 @@ def analizar_endpoint():
     return jsonify(resultado), status
 
 
-# 👇 Agregá esto justo antes del bloque main
+# ----------------------------------------------------
+#          ENDPOINT MULTIPLE (3 FOTOS JUNTAS)
+# ----------------------------------------------------
+
+@app.route("/analizar-multiples", methods=["POST"])
+def analizar_multiples_endpoint():
+    tipo = request.form.get("tipo", "producto")
+
+    if "fotos" not in request.files:
+        return jsonify({"error": "No se enviaron fotos[]"}), 400
+
+    files = request.files.getlist("fotos")
+    if len(files) == 0:
+        return jsonify({"error": "Lista vacía en fotos[]"}), 400
+
+    resultados = []
+    temp_paths = []
+
+    try:
+        # Guardar temporales
+        for idx, file in enumerate(files):
+            temp_path = f"temp_multi_{idx}_{file.filename}"
+            file.save(temp_path)
+            temp_paths.append(temp_path)
+
+        # Analizar cada imagen
+        for path in temp_paths:
+            data, _ = analyze_image(path, tipo)
+            resultados.append(data)
+
+    finally:
+        # Borrar temporales
+        for path in temp_paths:
+            if os.path.exists(path):
+                os.remove(path)
+
+    return jsonify({"resultados": resultados}), 200
+
+
+# ----------------------------------------------------
+#                     PING
+# ----------------------------------------------------
+
 @app.route("/ping")
 def ping():
     return "pong", 200
 
 
+# ----------------------------------------------------
+#                     MAIN
+# ----------------------------------------------------
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
-
