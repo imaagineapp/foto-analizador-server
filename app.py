@@ -11,6 +11,14 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # ----------------------------------------------------
+#         MODELOS HAAR PARA ROSTRO / OJOS / SONRISA
+# ----------------------------------------------------
+
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+smile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_smile.xml")
+
+# ----------------------------------------------------
 #                 FUNCIONES DE ANÁLISIS
 # ----------------------------------------------------
 
@@ -47,6 +55,35 @@ def file_size_score(path):
     size_kb = os.path.getsize(path) / 1024
     return float(min(1.0, max(0.0, size_kb / 100.0)))
 
+# ---------------- FACE METRICS -----------------------
+
+def face_metrics(img, gray):
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+    if len(faces) == 0:
+        return {
+            "rostro_detectado": 0.0,
+            "sonrisa": 0.0,
+            "ojos_abiertos": 0.0
+        }
+
+    # Tomar la primera cara
+    (x, y, w, h) = faces[0]
+    face_gray = gray[y:y+h, x:x+w]
+
+    # Sonrisa
+    smiles = smile_cascade.detectMultiScale(face_gray, 1.8, 20)
+    sonrisa_score = 1.0 if len(smiles) > 0 else 0.0
+
+    # Ojos
+    eyes = eye_cascade.detectMultiScale(face_gray, 1.2, 8)
+    ojos_score = min(1.0, len(eyes) / 2)  # 1.0 si detecta 2 ojos
+
+    return {
+        "rostro_detectado": 1.0,
+        "sonrisa": sonrisa_score,
+        "ojos_abiertos": ojos_score
+    }
 
 # ----------------------------------------------------
 #                FUNCIÓN PRINCIPAL
@@ -56,7 +93,9 @@ def analyze_image(path, tipo="producto"):
     img = cv2.imread(path)
     if img is None:
         empty_metrics = {k: 0.0 for k in [
-            "nitidez", "brillo", "contraste", "ruido", "color", "encuadre", "peso"]}
+            "nitidez", "brillo", "contraste", "ruido", "color",
+            "encuadre", "peso", "rostro_detectado", "sonrisa", "ojos_abiertos"
+        ]}
         return {
             "tipo": tipo,
             "metricas": empty_metrics,
@@ -78,24 +117,35 @@ def analyze_image(path, tipo="producto"):
         "peso": float(file_size_score(path))
     }
 
+    # Añadir rostro / ojos / sonrisa
+    face_data = face_metrics(img, gray)
+    results.update(face_data)
+
     normalized = {k: float(min(1.0, max(0.0, v))) for k, v in results.items()}
 
     # ---------- PESOS SEGÚN TIPO ----------
+
     if tipo == "producto":
         weights = {
             "nitidez": 0.25, "brillo": 0.15, "contraste": 0.1,
             "ruido": 0.1, "color": 0.15, "encuadre": 0.2, "peso": 0.05
         }
+
     elif tipo == "perfil":
         weights = {
             "nitidez": 0.15, "brillo": 0.25, "contraste": 0.1,
             "ruido": 0.1, "color": 0.25, "encuadre": 0.1, "peso": 0.05
         }
+
     elif tipo == "red_social":
         weights = {
-            "nitidez": 0.15, "brillo": 0.2, "contraste": 0.2,
-            "ruido": 0.1, "color": 0.25, "encuadre": 0.05, "peso": 0.05
+            "nitidez": 0.15, "brillo": 0.15, "contraste": 0.1,
+            "ruido": 0.1, "color": 0.15, "encuadre": 0.05, "peso": 0.05,
+            "rostro_detectado": 0.1,
+            "sonrisa": 0.1,
+            "ojos_abiertos": 0.15
         }
+
     else:
         weights = {
             "nitidez": 0.25, "brillo": 0.15, "contraste": 0.1,
@@ -103,7 +153,9 @@ def analyze_image(path, tipo="producto"):
         }
 
     weighted_contributions = {
-        k: float(normalized[k] * weights.get(k, 0)) for k in normalized}
+        k: float(normalized[k] * weights.get(k, 0)) for k in normalized
+    }
+
     score = float(sum(weighted_contributions.values()))
 
     top_metric = max(weighted_contributions, key=weighted_contributions.get)
@@ -115,10 +167,13 @@ def analyze_image(path, tipo="producto"):
         "ruido": "Presenta menos ruido digital y una imagen más limpia.",
         "color": "Destaca por sus colores más vivos y naturales.",
         "encuadre": "Está mejor encuadrada y centrada.",
-        "peso": "Tiene un tamaño de archivo óptimo (buena calidad sin exceso de peso)."
+        "peso": "Tiene un tamaño de archivo óptimo (buena calidad sin exceso de peso).",
+        "rostro_detectado": "Se detectó claramente el rostro.",
+        "sonrisa": "La persona está sonriendo, transmite mejor energía.",
+        "ojos_abiertos": "Los ojos están bien abiertos, se ve más natural."
     }
-    razon = razon_map.get(
-        top_metric, f"Destaca en {top_metric.replace('_', ' ')}")
+
+    razon = razon_map.get(top_metric, f"Destaca en {top_metric.replace('_', ' ')}")
 
     return {
         "tipo": tipo,
@@ -128,7 +183,6 @@ def analyze_image(path, tipo="producto"):
         "razon": razon,
         "mejor_foto": os.path.basename(path)
     }, 200
-
 
 # ----------------------------------------------------
 #                  ENDPOINT 1 FOTO
@@ -155,9 +209,8 @@ def analizar_endpoint():
 
     return jsonify(resultado), status
 
-
 # ----------------------------------------------------
-#          ENDPOINT MULTIPLE (3 FOTOS JUNTAS)
+#        ENDPOINT MULTIPLE (3 FOTOS JUNTAS)
 # ----------------------------------------------------
 
 @app.route("/analizar-multiples", methods=["POST"])
@@ -175,25 +228,21 @@ def analizar_multiples_endpoint():
     temp_paths = []
 
     try:
-        # Guardar temporales
         for idx, file in enumerate(files):
             temp_path = f"temp_multi_{idx}_{file.filename}"
             file.save(temp_path)
             temp_paths.append(temp_path)
 
-        # Analizar cada imagen
         for path in temp_paths:
             data, _ = analyze_image(path, tipo)
             resultados.append(data)
 
     finally:
-        # Borrar temporales
         for path in temp_paths:
             if os.path.exists(path):
                 os.remove(path)
 
     return jsonify({"resultados": resultados}), 200
-
 
 # ----------------------------------------------------
 #                     PING
@@ -202,7 +251,6 @@ def analizar_multiples_endpoint():
 @app.route("/ping")
 def ping():
     return "pong", 200
-
 
 # ----------------------------------------------------
 #                     MAIN
