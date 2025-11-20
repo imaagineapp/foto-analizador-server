@@ -6,17 +6,16 @@ from skimage.morphology import disk
 from scipy.ndimage import laplace
 from flask import Flask, request, jsonify
 
-# pylint: disable=E1101
-
 app = Flask(__name__)
 
 # ----------------------------------------------------
-#         MODELOS HAAR PARA ROSTRO / OJOS / SONRISA
+#        RUTAS DE MODELOS HAAR (MÁS SEGURO EN RENDER)
 # ----------------------------------------------------
+HAAR_PATH = cv2.data.haarcascades
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-smile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_smile.xml")
+face_cascade = cv2.CascadeClassifier(os.path.join(HAAR_PATH, "haarcascade_frontalface_default.xml"))
+eye_cascade = cv2.CascadeClassifier(os.path.join(HAAR_PATH, "haarcascade_eye.xml"))
+smile_cascade = cv2.CascadeClassifier(os.path.join(HAAR_PATH, "haarcascade_smile.xml"))
 
 # ----------------------------------------------------
 #                 FUNCIONES DE ANÁLISIS
@@ -67,17 +66,14 @@ def face_metrics(img, gray):
             "ojos_abiertos": 0.0
         }
 
-    # Tomar la primera cara
     (x, y, w, h) = faces[0]
     face_gray = gray[y:y+h, x:x+w]
 
-    # Sonrisa
     smiles = smile_cascade.detectMultiScale(face_gray, 1.8, 20)
     sonrisa_score = 1.0 if len(smiles) > 0 else 0.0
 
-    # Ojos
     eyes = eye_cascade.detectMultiScale(face_gray, 1.2, 8)
-    ojos_score = min(1.0, len(eyes) / 2)  # 1.0 si detecta 2 ojos
+    ojos_score = min(1.0, len(eyes) / 2)
 
     return {
         "rostro_detectado": 1.0,
@@ -117,13 +113,10 @@ def analyze_image(path, tipo="producto"):
         "peso": float(file_size_score(path))
     }
 
-    # Añadir rostro / ojos / sonrisa
     face_data = face_metrics(img, gray)
     results.update(face_data)
 
     normalized = {k: float(min(1.0, max(0.0, v))) for k, v in results.items()}
-
-    # ---------- PESOS SEGÚN TIPO ----------
 
     if tipo == "producto":
         weights = {
@@ -163,14 +156,14 @@ def analyze_image(path, tipo="producto"):
     razon_map = {
         "nitidez": "Tiene un mejor enfoque y detalles más definidos.",
         "brillo": "Posee una iluminación más equilibrada.",
-        "contraste": "Muestra un contraste más nítido entre luces y sombras.",
-        "ruido": "Presenta menos ruido digital y una imagen más limpia.",
-        "color": "Destaca por sus colores más vivos y naturales.",
-        "encuadre": "Está mejor encuadrada y centrada.",
-        "peso": "Tiene un tamaño de archivo óptimo (buena calidad sin exceso de peso).",
-        "rostro_detectado": "Se detectó claramente el rostro.",
-        "sonrisa": "La persona está sonriendo, transmite mejor energía.",
-        "ojos_abiertos": "Los ojos están bien abiertos, se ve más natural."
+        "contraste": "Muestra un contraste más nítido.",
+        "ruido": "Presenta menos ruido digital.",
+        "color": "Colores más vivos y naturales.",
+        "encuadre": "Mejor encuadre y centrado.",
+        "peso": "Tamaño de archivo óptimo.",
+        "rostro_detectado": "Se detectó un rostro.",
+        "sonrisa": "La persona está sonriendo.",
+        "ojos_abiertos": "Los ojos están bien abiertos."
     }
 
     razon = razon_map.get(top_metric, f"Destaca en {top_metric.replace('_', ' ')}")
@@ -185,7 +178,7 @@ def analyze_image(path, tipo="producto"):
     }, 200
 
 # ----------------------------------------------------
-#                  ENDPOINT 1 FOTO
+#                   ENDPOINT 1 FOTO
 # ----------------------------------------------------
 
 @app.route("/analizar", methods=["POST"])
@@ -210,7 +203,7 @@ def analizar_endpoint():
     return jsonify(resultado), status
 
 # ----------------------------------------------------
-#        ENDPOINT MULTIPLE (3 FOTOS JUNTAS)
+#            ENDPOINT MULTIPLE (3 FOTOS)
 # ----------------------------------------------------
 
 @app.route("/analizar-multiples", methods=["POST"])
@@ -222,7 +215,7 @@ def analizar_multiples_endpoint():
 
     files = request.files.getlist("fotos")
     if len(files) == 0:
-        return jsonify({"error": "Lista vacía en fotos[]"}), 400
+        return jsonify({"error": "Lista vacía"}), 400
 
     resultados = []
     temp_paths = []
@@ -245,7 +238,7 @@ def analizar_multiples_endpoint():
     return jsonify({"resultados": resultados}), 200
 
 # ----------------------------------------------------
-#                     PING
+#                      PING
 # ----------------------------------------------------
 
 @app.route("/ping")
@@ -253,8 +246,8 @@ def ping():
     return "pong", 200
 
 # ----------------------------------------------------
-#                     MAIN
+#                      MAIN
 # ----------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000)
