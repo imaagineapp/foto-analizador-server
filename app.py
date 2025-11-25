@@ -123,7 +123,7 @@ def analyze_image(path, tipo="producto"):
         "tipo": tipo,
         "metricas": results,
         "normalizadas": normalized,
-        "puntaje_final": 0.0,  # se recalcula luego
+        "puntaje_final": 0.0,  # recalcularemos más abajo
         "razon": "",
         "mejor_foto": os.path.basename(path)
     }, 200
@@ -151,46 +151,38 @@ def analizar_endpoint():
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-    # Recalcular puntaje y top_metric para 1 foto
+    # recalcular puntaje final normalizado
     normalized = resultado["normalizadas"]
     tipo_weights = {}
     if tipo == "producto":
-        tipo_weights = {
-            "nitidez": 0.25, "brillo": 0.15, "contraste": 0.1,
-            "ruido": 0.1, "color": 0.15, "encuadre": 0.08, "peso": 0.05
-        }
+        tipo_weights = {"nitidez":0.25,"brillo":0.15,"contraste":0.1,"ruido":0.1,"color":0.15,"encuadre":0.08,"peso":0.05}
     elif tipo == "perfil":
-        tipo_weights = {
-            "nitidez": 0.15, "brillo": 0.25, "contraste": 0.1,
-            "ruido": 0.1, "color": 0.25, "encuadre": 0.1, "peso": 0.05
-        }
+        tipo_weights = {"nitidez":0.15,"brillo":0.25,"contraste":0.1,"ruido":0.1,"color":0.25,"encuadre":0.1,"peso":0.05}
     elif tipo == "red_social":
-        tipo_weights = {
-            "nitidez": 0.15, "brillo": 0.15, "contraste": 0.1,
-            "ruido": 0.1, "color": 0.15, "encuadre": 0.05, "peso": 0.05,
-            "rostro_detectado": 0.1, "sonrisa": 0.1, "ojos_abiertos": 0.15
-        }
+        tipo_weights = {"nitidez":0.15,"brillo":0.15,"contraste":0.1,"ruido":0.1,"color":0.15,"encuadre":0.05,"peso":0.05,
+                        "rostro_detectado":0.1,"sonrisa":0.1,"ojos_abiertos":0.15}
     else:
-        tipo_weights = {k: 1.0 for k in normalized.keys()}
+        tipo_weights = {k:1.0 for k in normalized.keys()}
 
-    weighted_contributions = {k: normalized[k] * tipo_weights.get(k, 0) for k in normalized}
-    resultado["puntaje_final"] = float(sum(weighted_contributions.values()))
+    weighted_contributions = {k: normalized[k]*tipo_weights.get(k,0) for k in normalized}
+    # Limitar a 1.0 (100%)
+    max_score = sum(tipo_weights.values())
+    resultado["puntaje_final"] = min(1.0, sum(weighted_contributions.values())/max_score)
+
     top_metric = max(weighted_contributions, key=weighted_contributions.get)
-
     razon_map = {
-        "nitidez": "Tiene un mejor enfoque y detalles más definidos.",
-        "brillo": "Posee una iluminación más equilibrada.",
-        "contraste": "Muestra un contraste más nítido.",
-        "ruido": "Presenta menos ruido digital.",
-        "color": "Colores más vivos y naturales.",
-        "encuadre": "Mejor encuadre y centrado.",
-        "peso": "Tamaño de archivo óptimo.",
-        "rostro_detectado": "Se detectó un rostro.",
-        "sonrisa": "La persona está sonriendo.",
-        "ojos_abiertos": "Los ojos están bien abiertos."
+        "nitidez":"Tiene un mejor enfoque y detalles más definidos.",
+        "brillo":"Posee una iluminación más equilibrada.",
+        "contraste":"Muestra un contraste más nítido.",
+        "ruido":"Presenta menos ruido digital.",
+        "color":"Colores más vivos y naturales.",
+        "encuadre":"Mejor encuadre y centrado.",
+        "peso":"Tamaño de archivo óptimo.",
+        "rostro_detectado":"Se detectó un rostro.",
+        "sonrisa":"La persona está sonriendo.",
+        "ojos_abiertos":"Los ojos están bien abiertos."
     }
-
-    resultado["razon"] = razon_map.get(top_metric, f"Destaca en {top_metric.replace('_', ' ')}")
+    resultado["razon"] = razon_map.get(top_metric,f"Destaca en {top_metric.replace('_',' ')}")
 
     return jsonify(resultado), status
 
@@ -203,87 +195,74 @@ def analizar_multiples_endpoint():
     tipo = request.form.get("tipo", "producto")
 
     if "fotos" not in request.files:
-        return jsonify({"error": "No se enviaron fotos[]"}), 400
+        return jsonify({"error":"No se enviaron fotos[]"}),400
 
     files = request.files.getlist("fotos")
-    if len(files) == 0:
-        return jsonify({"error": "Lista vacía"}), 400
+    if len(files)==0:
+        return jsonify({"error":"Lista vacía"}),400
 
     resultados = []
     temp_paths = []
 
     try:
-        for idx, file in enumerate(files):
-            temp_path = f"temp_multi_{idx}_{file.filename}"
+        for idx,file in enumerate(files):
+            temp_path=f"temp_multi_{idx}_{file.filename}"
             file.save(temp_path)
             temp_paths.append(temp_path)
 
-        # Analizar cada foto
         for path in temp_paths:
-            data, _ = analyze_image(path, tipo)
+            data,_=analyze_image(path,tipo)
             resultados.append(data)
 
-        # ------------------------------
-        # NORMALIZAR MÉTRICAS ENTRE FOTOS
-        # ------------------------------
-        if len(resultados) > 1:
+        # Normalizar métricas entre fotos
+        if len(resultados)>1:
             metricas_keys = resultados[0]["normalizadas"].keys()
             for key in metricas_keys:
                 valores = [r["normalizadas"][key] for r in resultados]
-                min_v, max_v = min(valores), max(valores)
-                rango = max_v - min_v if max_v != min_v else 1.0
+                min_v,max_v = min(valores),max(valores)
+                rango = max_v-min_v if max_v!=min_v else 1.0
                 for r in resultados:
-                    r["normalizadas"][key] = (r["normalizadas"][key] - min_v) / rango
+                    r["normalizadas"][key]=(r["normalizadas"][key]-min_v)/rango
 
-            # Recalcular puntaje_final y top_metric
-            for r in resultados:
-                weights = {}
-                if tipo == "producto":
-                    weights = {
-                        "nitidez": 0.25, "brillo": 0.15, "contraste": 0.1,
-                        "ruido": 0.1, "color": 0.15, "encuadre": 0.08, "peso": 0.05
-                    }
-                elif tipo == "perfil":
-                    weights = {
-                        "nitidez": 0.15, "brillo": 0.25, "contraste": 0.1,
-                        "ruido": 0.1, "color": 0.25, "encuadre": 0.1, "peso": 0.05
-                    }
-                elif tipo == "red_social":
-                    weights = {
-                        "nitidez": 0.15, "brillo": 0.15, "contraste": 0.1,
-                        "ruido": 0.1, "color": 0.15, "encuadre": 0.05, "peso": 0.05,
-                        "rostro_detectado": 0.1,
-                        "sonrisa": 0.1,
-                        "ojos_abiertos": 0.15
-                    }
-                else:
-                    weights = {k: 1.0 for k in r["normalizadas"].keys()}
+        # Recalcular puntaje_final y razon
+        for r in resultados:
+            normalized = r["normalizadas"]
+            tipo_weights = {}
+            if tipo=="producto":
+                tipo_weights = {"nitidez":0.25,"brillo":0.15,"contraste":0.1,"ruido":0.1,"color":0.15,"encuadre":0.08,"peso":0.05}
+            elif tipo=="perfil":
+                tipo_weights = {"nitidez":0.15,"brillo":0.25,"contraste":0.1,"ruido":0.1,"color":0.25,"encuadre":0.1,"peso":0.05}
+            elif tipo=="red_social":
+                tipo_weights = {"nitidez":0.15,"brillo":0.15,"contraste":0.1,"ruido":0.1,"color":0.15,"encuadre":0.05,"peso":0.05,
+                                "rostro_detectado":0.1,"sonrisa":0.1,"ojos_abiertos":0.15}
+            else:
+                tipo_weights = {k:1.0 for k in normalized.keys()}
 
-                weighted_contributions = {k: r["normalizadas"][k] * weights.get(k, 0) for k in r["normalizadas"]}
-                r["puntaje_final"] = float(sum(weighted_contributions.values()))
-                top_metric = max(weighted_contributions, key=weighted_contributions.get)
+            weighted_contributions = {k:normalized[k]*tipo_weights.get(k,0) for k in normalized}
+            max_score = sum(tipo_weights.values())
+            r["puntaje_final"]=min(1.0,sum(weighted_contributions.values())/max_score)
 
-                razon_map = {
-                    "nitidez": "Tiene un mejor enfoque y detalles más definidos.",
-                    "brillo": "Posee una iluminación más equilibrada.",
-                    "contraste": "Muestra un contraste más nítido.",
-                    "ruido": "Presenta menos ruido digital.",
-                    "color": "Colores más vivos y naturales.",
-                    "encuadre": "Mejor encuadre y centrado.",
-                    "peso": "Tamaño de archivo óptimo.",
-                    "rostro_detectado": "Se detectó un rostro.",
-                    "sonrisa": "La persona está sonriendo.",
-                    "ojos_abiertos": "Los ojos están bien abiertos."
-                }
-
-                r["razon"] = razon_map.get(top_metric, f"Destaca en {top_metric.replace('_', ' ')}")
+            top_metric = max(weighted_contributions,key=weighted_contributions.get)
+            razon_map = {
+                "nitidez":"Tiene un mejor enfoque y detalles más definidos.",
+                "brillo":"Posee una iluminación más equilibrada.",
+                "contraste":"Muestra un contraste más nítido.",
+                "ruido":"Presenta menos ruido digital.",
+                "color":"Colores más vivos y naturales.",
+                "encuadre":"Mejor encuadre y centrado.",
+                "peso":"Tamaño de archivo óptimo.",
+                "rostro_detectado":"Se detectó un rostro.",
+                "sonrisa":"La persona está sonriendo.",
+                "ojos_abiertos":"Los ojos están bien abiertos."
+            }
+            r["razon"]=razon_map.get(top_metric,f"Destaca en {top_metric.replace('_',' ')}")
 
     finally:
         for path in temp_paths:
             if os.path.exists(path):
                 os.remove(path)
 
-    return jsonify({"resultados": resultados}), 200
+    return jsonify({"resultados":resultados}),200
 
 # ----------------------------------------------------
 #                      PING
@@ -291,11 +270,11 @@ def analizar_multiples_endpoint():
 
 @app.route("/ping")
 def ping():
-    return "pong", 200
+    return "pong",200
 
 # ----------------------------------------------------
 #                      MAIN
 # ----------------------------------------------------
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__=="__main__":
+    app.run(host="0.0.0.0",port=5000)
