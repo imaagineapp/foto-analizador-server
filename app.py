@@ -113,15 +113,19 @@ def analyze_image(path, tipo="producto"):
         "peso": float(file_size_score(path))
     }
 
+    # 🔥 Limitar encuadre para que no domine la decisión
+    results["encuadre"] = min(results["encuadre"], 0.45)
+
     face_data = face_metrics(img, gray)
     results.update(face_data)
 
     normalized = {k: float(min(1.0, max(0.0, v))) for k, v in results.items()}
 
+    # 🔥 AJUSTE: bajar peso de encuadre en fotos de producto
     if tipo == "producto":
         weights = {
             "nitidez": 0.25, "brillo": 0.15, "contraste": 0.1,
-            "ruido": 0.1, "color": 0.15, "encuadre": 0.2, "peso": 0.05
+            "ruido": 0.1, "color": 0.15, "encuadre": 0.08, "peso": 0.05
         }
 
     elif tipo == "perfil":
